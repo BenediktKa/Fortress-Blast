@@ -15,7 +15,7 @@
 #define MAX_PARTICLES 10 // If a player needs more than this number, a random one is deleted, but too many might cause memory problems
 #define MESSAGE_PREFIX "{orange}[Fortress Blast]"
 #define PLUGIN_VERSION "3.0.2"
-#define MOTD_VERSION "3.0"
+#define MOTD_VERSION "3.0
 
 public Plugin myinfo = {
 	name = "Fortress Blast",
@@ -106,10 +106,12 @@ public void OnPluginStart() {
 
 	// In case the plugin is reloaded mid-round
 	for (int client = 1; client <= MaxClients; client++) {
-		if (IsClientInGame(client)) {
-			SDKHook(client, SDKHook_OnTakeDamageAlive, OnTakeDamage);
-			SDKHook(client, SDKHook_StartTouch, OnStartTouchFrozen);
+		if (!IsValidClient(client)) {
+			continue;
 		}
+
+		SDKHook(client, SDKHook_OnTakeDamageAlive, OnTakeDamage);
+		SDKHook(client, SDKHook_StartTouch, OnStartTouchFrozen);
 	}
 
 	// Hooks
@@ -118,11 +120,12 @@ public void OnPluginStart() {
 	HookEvent("player_death", player_death);
 
 	// Commands
-	RegConsoleCmd("sm_fortressblast", FBMenu);
-	RegConsoleCmd("sm_coordsjson", CoordsJson);
+	RegConsoleCmd("sm_fortressblast", Command_FBMenu);
+	RegConsoleCmd("sm_coordsjson", Command_CoordsJson);
 	RegConsoleCmd("sm_setpowerup", Command_SetPowerup);
 	RegConsoleCmd("sm_spawnpowerup", Command_SpawnPowerup);
 
+	// Translations
 	LoadTranslations("common.phrases");
 
 	// ConVars
@@ -253,7 +256,7 @@ public void TF2_OnConditionAdded(int client, TFCond condition) {
 	}
 }
 
-public Action FBMenu(int client, int args) {
+public Action Command_FBMenu(int client, int args) {
 	int bitfield = sm_fortressblast_powerups.IntValue;
 	if (bitfield < 1 && bitfield > ((Bitfieldify(NumberOfPowerups) * 2) - 1)) {
 		bitfield = -1;
@@ -518,7 +521,7 @@ public void OnClientPutInServer(int client) {
 	powerup[client] = 0;
 	SDKHook(client, SDKHook_OnTakeDamageAlive, OnTakeDamage);
 	SDKHook(client, SDKHook_StartTouch, OnStartTouchFrozen);
-	CreateTimer(3.0, Timer_PesterThisDude, client);
+	CreateTimer(3.0, Timer_PesterThisDude, GetClientSerial(client));
 }
 
 stock int SpawnPower(float location[3], bool respawn, int id = 0) {
@@ -607,7 +610,7 @@ public int SpawnGift(float location[3]) {
 
 public Action OnStartTouchFrozen(int entity, int other) {
 	// Test that using player and touched player are both valid targets
-	if (entity > 0 && entity <= MaxClients && other > 0 && other <= MaxClients && IsClientInGame(entity) && IsClientInGame(other)) {
+	if (IsValidClient(entity) && IsValidClient(other)) {
 		if (FrostTouch[entity] && !FrostTouchFrozen[other]) {
 			float vel[3];
 			GetEntPropVector(other, Prop_Data, "m_vecVelocity", vel);
@@ -642,7 +645,7 @@ public Action Timer_FrostTouchUnfreeze(Handle timer, int client) {
 }
 
 public Action OnStartTouchRespawn(int entity, int other) {
-	if (other > 0 && other <= MaxClients) {
+	if (IsValidClient(other)) {
 		if (!VictoryTime && !GameRules_GetProp("m_bInWaitingForPlayers")) {
 			float coords[3];
 			GetEntPropVector(entity, Prop_Send, "m_vecOrigin", coords);
@@ -1057,7 +1060,7 @@ public Action Timer_BeginTeleporter(Handle timer, int client) {
 				float coords[3] = 69.420;
 				GetEntPropVector(entity, Prop_Send, "m_vecOrigin", coords);
 				float angles[3] = 69.420;
-				GetEntPropVector(entity, Prop_Data, "m_angRotation", angles); 
+				GetEntPropVector(entity, Prop_Data, "m_angRotation", angles);
 				coords[2] += 24.00;
 				TeleportEntity(client, coords, angles, NULL_VECTOR);
 				break;
@@ -1139,7 +1142,7 @@ public Action Timer_RemoveMegaMann(Handle timer, int client) {
 	MegaMannHandle[client] = INVALID_HANDLE;
 	MegaMann[client] = false;
 	MegaMannStuckComplete[client] = true;
-	if (IsClientInGame(client)) {
+	if (IsValidClient(client)) {
 		SetVariantString("1 0");
 		AcceptEntityInput(client, "SetModelScale");
 		// Remove excess overheal, but leave injuries
@@ -1153,14 +1156,14 @@ public Action Timer_RemoveTimeTravel(Handle timer, int client) {
 	TimeTravelHandle[client] = INVALID_HANDLE;
 	TimeTravel[client] = false;
 	SetThirdPerson(client, false);
-	if (IsClientInGame(client)) {
+	if (IsValidClient(client)) {
 		TF2_StunPlayer(client, 0.0, 0.0, TF_STUNFLAG_SLOWDOWN);
 	}
 }
 
 public Action Timer_RestoreGravity(Handle timer, int client) {
 	GyrocopterHandle[client] = INVALID_HANDLE;
-	if (IsClientInGame(client)) {
+	if (IsValidClient(client)) {
 		SetEntityGravity(client, 1.0);
 	}
 }
@@ -1177,18 +1180,24 @@ public Action Timer_RemoveShockAbsorb(Handle timer, int client) {
 
 public Action Timer_RecalcSpeed(Handle timer, int client) {
 	if (SpeedRotationsLeft[client] > 1) {
-		if (IsPlayerAlive(client)) {
-			if (GetEntPropFloat(client, Prop_Send, "m_flMaxspeed") != SuperSpeed[client]) { // If TF2 changed the speed
-				OldSpeed[client] = GetEntPropFloat(client, Prop_Send, "m_flMaxspeed");
-			}
-			SuperSpeed[client] = OldSpeed[client] + (SpeedRotationsLeft[client] * 2);
-			SetEntPropFloat(client, Prop_Send, "m_flMaxspeed", SuperSpeed[client]);
-			CreateTimer(0.1, Timer_RecalcSpeed, client);
+
+		if (!IsValidClient(client)) {
+			SpeedRotationsLeft[client] = 0;
+			return Plugin_Handled;
 		}
+
+		if (GetEntPropFloat(client, Prop_Send, "m_flMaxspeed") != SuperSpeed[client]) { // If TF2 changed the speed
+			OldSpeed[client] = GetEntPropFloat(client, Prop_Send, "m_flMaxspeed");
+		}
+
+		SuperSpeed[client] = OldSpeed[client] + (SpeedRotationsLeft[client] * 2);
+		SetEntPropFloat(client, Prop_Send, "m_flMaxspeed", SuperSpeed[client]);
+		CreateTimer(0.1, Timer_RecalcSpeed, client);
 	} else {
 		TF2_StunPlayer(client, 0.0, 0.0, TF_STUNFLAG_SLOWDOWN);
 	}
 	SpeedRotationsLeft[client]--;
+	return Plugin_Handled;
 }
 
 public void DoHudText(int client) {
@@ -1220,6 +1229,7 @@ public void DoHudText(int client) {
 			ShowSyncHudText(client, texthand, "Collected powerup:\nMagnetism");
 		}
 	}
+
 	if (GiftHunt && !VictoryTime) {
   		SetHudTextParams(-1.0, 0.775, 0.25, 255, 255, 255, 255);
   		ShowSyncHudText(client, gifttext, "BLU: %d | Playing to %d gifts | RED: %d", Gifts[3], giftgoal, Gifts[2]);
@@ -1356,11 +1366,11 @@ public bool HandleHasKey(JSONObject handle, char key[80]) {
 	return (StrContains(acctest, key, true) != -1);
 }
 
-stock void ClearTimer(Handle Timer) { // From SourceMod forums
-    if (Timer != INVALID_HANDLE) {
-        CloseHandle(Timer);
-        Timer = INVALID_HANDLE;
-    }
+stock void ClearTimer(Handle timer) { // From SourceMod forums
+	if (timer != INVALID_HANDLE) {
+		CloseHandle(timer);
+		timer = INVALID_HANDLE;
+	}
 }
 
 public void PowerupParticle(int client, char particlename[80], float time) {
@@ -1626,13 +1636,16 @@ public void CollectedGift(int client) {
 				}
 			}
 		}
+
 		for (int client2 = 1 ; client2 <= MaxClients ; client2++) {
-			if (IsClientInGame(client2)) {
-				if (GetClientTeam(client2) == GetClientTeam(client)) {
-					EmitSoundToClient(client2, "fortressblast2/gifthunt_goal_playerteam.mp3", client2);
-				} else {
-					EmitSoundToClient(client2, "fortressblast2/gifthunt_goal_enemyteam.mp3", client2);
-				}
+			if (!IsValidClient(client2)) {
+				continue;
+			}
+
+			if (GetClientTeam(client2) == GetClientTeam(client)) {
+				EmitSoundToClient(client2, "fortressblast2/gifthunt_goal_playerteam.mp3", client2);
+			} else {
+				EmitSoundToClient(client2, "fortressblast2/gifthunt_goal_enemyteam.mp3", client2);
 			}
 		}
 	}
@@ -1704,7 +1717,7 @@ public Action Command_SpawnPowerup(int client, int args){
 	return Plugin_Handled;
 }
 
-public Action CoordsJson(int client, int args) {
+public Action Command_CoordsJson(int client, int args) {
 	if (client == 0) {
 		PrintToServer("[Fortress Blast] Because this command uses the crosshair, it cannot be executed from the server console.");
 		return Plugin_Handled;
@@ -1762,7 +1775,7 @@ public bool IsEntityStuck(int iEntity) { // Roll the Dice function with new synt
 	GetEntPropVector(iEntity, Prop_Send, "m_vecOrigin", flOrigin);
 	GetEntPropVector(iEntity, Prop_Send, "m_vecMins", flMins);
 	GetEntPropVector(iEntity, Prop_Send, "m_vecMaxs", flMaxs);
-	
+
 	TR_TraceHullFilter(flOrigin, flOrigin, flMins, flMaxs, MASK_SOLID, TraceFilterNotSelf, iEntity);
 	return TR_DidHit();
 }
